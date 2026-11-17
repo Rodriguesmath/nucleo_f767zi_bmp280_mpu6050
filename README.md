@@ -55,9 +55,20 @@ make test
 # 2. Compilar firmware STM32F767ZIT6 (.elf, .hex, .bin)
 make all
 
-# 3. Executar testes do bridge serial e abrir visualizador 3D Three.js
+# 3. Gravar (flashar) firmware na NUCLEO-F767ZI via ST-LINK SWD (0x08000000 + verify + reset)
+make flash
+
+# 4. Executar testes do bridge serial e abrir visualizador 3D Three.js
 make viewer
 ```
+
+> `make flash` invoca o `STM32_Programmer_CLI` (`CUBEPROG` no [`Makefile`](Makefile), detectado no `PATH` ou na instalação padrão do STM32CubeIDE):
+>
+> ```bash
+> STM32_Programmer_CLI -c port=SWD -w build/nucleo_f767zi_bmp280_mpu6050.bin 0x08000000 -v -rst
+> ```
+>
+> Caso o `STM32_Programmer_CLI` esteja em outro diretório, sobrescreva com `make flash CUBEPROG=/caminho/STM32_Programmer_CLI`.
 
 ---
 
