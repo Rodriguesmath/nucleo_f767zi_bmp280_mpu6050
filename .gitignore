@@ -1,0 +1,13 @@
+# Build artifacts
+build/
+*.o
+*.d
+*.elf
+*.hex
+*.bin
+*.map
+tests/test_bmp280
+tests/test_speculative_edge_cases
+tests/test_mpu6050_filter
+scratch/
+.settings/
