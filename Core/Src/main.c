@@ -38,6 +38,20 @@ int __io_putchar(int ch)
   return ch;
 }
 
+int _write(int file, char *ptr, int len)
+{
+  (void)file;
+  if ((ptr == NULL) || (len <= 0))
+  {
+    return 0;
+  }
+  if (HAL_UART_Transmit(&huart3, (uint8_t *)ptr, (uint16_t)len, 200U) != HAL_OK)
+  {
+    return -1;
+  }
+  return len;
+}
+
 static bmp280_status_t Probe_BMP280_I2C(uint8_t *out_addr)
 {
   bmp280_status_t status = bmp280_init_default(&bmp280, &hi2c1, BMP280_I2C_ADDR_PRIM);
@@ -68,6 +82,7 @@ int main(void)
 
   MX_GPIO_Init();
   MX_USART3_UART_Init();
+  setvbuf(stdout, NULL, _IONBF, 0);
   MX_I2C1_Init();
 
   printf("\r\n=======================================================================\r\n");
@@ -182,7 +197,7 @@ int main(void)
 
         if (bmp280_read_data(&bmp280, &temp_c, &press_pa, &alt_m) == BMP280_OK)
         {
-          printf("[NUCLEO-F767ZI BMP280 I2C] Temp: %6.2f \xC2\xB0""C | Press: %8.2f hPa (%7.0f Pa) | Hypsometric Alt: %7.2f m\r\n",
+          printf("[NUCLEO-F767ZI BMP280 I2C] Temp: %6.2f degC | Press: %8.2f hPa (%7.0f Pa) | Hypsometric Alt: %7.2f m\r\n",
                  temp_c, press_pa / 100.0f, press_pa, alt_m);
         }
         else
@@ -194,7 +209,7 @@ int main(void)
 
       if (mpuOk)
       {
-        printf("[NUCLEO-F767ZI MPU6050 I2C] Acc: %+6.2f,%+6.2f,%+6.2f g | Gyro: %+7.2f,%+7.2f,%+7.2f dps | Temp: %5.2f \xC2\xB0""C | Pose R:%+6.1f P:%+6.1f Y:%+6.1f deg\r\n",
+        printf("[NUCLEO-F767ZI MPU6050 I2C] Acc: %+6.2f,%+6.2f,%+6.2f g | Gyro: %+7.2f,%+7.2f,%+7.2f dps | Temp: %5.2f degC | Pose R:%+6.1f P:%+6.1f Y:%+6.1f deg\r\n",
                imuData.accelXG, imuData.accelYG, imuData.accelZG,
                imuData.gyroXDps, imuData.gyroYDps, imuData.gyroZDps,
                imuData.tempC,

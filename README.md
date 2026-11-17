@@ -59,7 +59,9 @@ make all
 make flash
 ```
 
-### Exemplo de Saída Serial (`115200 8N1`)
+### Exemplo de Saída Serial (`115200 8N1` — ASCII 7-bit compatível com CuteCom)
+
+> Saída UART utiliza exclusivamente ASCII 7-bit imprimível (`degC`, `\r\n`, sem sequências UTF-8 multi-byte ou códigos ANSI), evitando caracteres corrompidos (`\0xc2\0xb0` ou `Â°`) no CuteCom. Configure o CuteCom em `115200`, `8N1`, `CR, LF` e modo ASCII (sem `Hex output`).
 
 ```text
 =======================================================================
@@ -72,6 +74,6 @@ make flash
 [INFO] Calibration: dig_P1=36477, dig_P2=-10685, dig_P3=3024
 [INFO] Probing MPU-6050 over I2C at 0x68...
 [OK] MPU-6050 detected over I2C at 0x68! WHO_AM_I: 0x68
-[NUCLEO-F767ZI BMP280 I2C] Temp:  24.85 °C | Press:  1012.30 hPa ( 101230 Pa) | Hypsometric Alt:    7.84 m
-[NUCLEO-F767ZI MPU6050 I2C] Acc:  +0.01, -0.02, +1.00 g | Gyro:   +0.12,  -0.05,  +0.03 dps | Temp: 26.40 °C | Pose R:  -1.1 P:  +0.6 Y:  +0.0 deg
+[NUCLEO-F767ZI BMP280 I2C] Temp:  24.85 degC | Press:  1012.30 hPa ( 101230 Pa) | Hypsometric Alt:    7.84 m
+[NUCLEO-F767ZI MPU6050 I2C] Acc:  +0.01, -0.02, +1.00 g | Gyro:   +0.12,  -0.05,  +0.03 dps | Temp: 26.40 degC | Pose R:  -1.1 P:  +0.6 Y:  +0.0 deg
 ```
