@@ -130,7 +130,10 @@ flash: $(BUILD_DIR)/$(TARGET).bin
 	@echo "Flashing with STM32CubeProgrammer..."
 	$(CUBEPROG) -c port=SWD -w $(BUILD_DIR)/$(TARGET).bin 0x08000000 -v -rst
 
+viewer:
+	./run_viewer.sh
+
 clean:
 	rm -rf $(BUILD_DIR)
 
-.PHONY: all clean test flash
+.PHONY: all clean test flash viewer

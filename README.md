@@ -55,11 +55,24 @@ make test
 # 2. Compilar firmware STM32F767ZIT6 (.elf, .hex, .bin)
 make all
 
-# 3. Gravar via ST-LINK (STM32CubeProgrammer)
-make flash
+# 3. Executar testes do bridge serial e abrir visualizador 3D Three.js
+make viewer
 ```
 
-### Exemplo de Saída Serial (`115200 8N1` — ASCII 7-bit compatível com CuteCom)
+---
+
+## 5. Visualizador 3D em Three.js & Flight HUD (`viewer/`)
+
+Aplicação WebGL2 de alta taxa de quadros (`60-144 FPS`) em [`viewer/`](viewer/) conectada ao bridge serial binário (`Float32Array` de 56 bytes via WebSocket em [`viewer/server.py`](viewer/server.py)):
+
+- **Aeronave 3D Articulada ([`viewer/src/aircraft.ts`](viewer/src/aircraft.ts))**: Fuselagem, asas e superfícies móveis (ailerons, profundor, leme) acionadas pelas taxas do giroscópio (`gyroX/Y/Z`), hélice animada pelo VSI, luzes de navegação e vetor 3D de aceleração/carga G (`accelX/Y/Z`).
+- **Aproveitamento Total dos Sensores ([`viewer/src/telemetry.ts`](viewer/src/telemetry.ts), [`viewer/src/hud.ts`](viewer/src/hud.ts))**:
+  - **Atitude**: Quaternion SLERP a partir de `Roll`, `Pitch`, `Yaw` (50 Hz no stream UART não-bloqueante por interrupção `USART3_IRQHandler`).
+  - **Barometria BMP280 (10 Hz)**: Altitude hipsométrica com ajuste de `QNH (hPa)`, altitude relativa (`Zero Alt`), `VSI (dH/dt)` e densidade do ar $\rho = \frac{P}{287.058 \cdot T}$ (`kg/m³`).
+  - **Primary Flight Display (PFD) & Gráficos Ring-Buffer**: Horizonte artificial, bússola, altímetro/VSI, indicador de derrapagem (`accelY`), carga G (`|a|`), $\Delta T$ (`IMU - OAT`) e gráficos em `Float32Array` sem alocação por quadro.
+  - **Modos**: Bridge Python (`Firefox` / qualquer navegador), `WebSerial` direto (`Chromium/Chrome`) e `Simulador` offline integrado.
+
+### Exemplo de Saída Serial (`115200 8N1` — 50 Hz IMU / 10 Hz BMP280, ASCII 7-bit CuteCom)
 
 > Saída UART utiliza exclusivamente ASCII 7-bit imprimível (`degC`, `\r\n`, sem sequências UTF-8 multi-byte ou códigos ANSI), evitando caracteres corrompidos (`\0xc2\0xb0` ou `Â°`) no CuteCom. Configure o CuteCom em `115200`, `8N1`, `CR, LF` e modo ASCII (sem `Hex output`).
 

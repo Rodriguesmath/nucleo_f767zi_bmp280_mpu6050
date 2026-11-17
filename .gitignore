@@ -11,3 +11,8 @@ tests/test_speculative_edge_cases
 tests/test_mpu6050_filter
 scratch/
 .settings/
+__pycache__/
+*.pyc
+viewer/node_modules/
+viewer/dist/
+viewer/.vite/

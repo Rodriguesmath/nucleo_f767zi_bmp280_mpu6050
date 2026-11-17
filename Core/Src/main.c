@@ -2,7 +2,8 @@
   ******************************************************************************
   * @file    main.c
   * @brief   NUCLEO-F767ZI Dual-Sensor Monitor: BMP280 (I2C) + MPU-6050 (I2C)
-  *          with Complementary Filter pose estimation and USART3 VCP telemetry.
+  *          with Complementary Filter pose estimation and non-blocking USART3
+  *          IT telemetry (50 Hz IMU/Pose, 10 Hz BMP280).
   ******************************************************************************
   */
 
@@ -14,8 +15,12 @@
 #include <stdbool.h>
 
 /* Private defines -----------------------------------------------------------*/
-#define IMU_SAMPLE_PERIOD_MS      10U   /* 100 Hz IMU sampling & filter update */
-#define TELEMETRY_PERIOD_MS       500U  /* 2 Hz serial telemetry + BMP280 read */
+#define IMU_SAMPLE_PERIOD_MS      10U    /* 100 Hz IMU sampling & filter update */
+#define MPU_TELEMETRY_PERIOD_MS   20U    /* 50 Hz MPU-6050 & Pose VCP stream */
+#define BMP_TELEMETRY_PERIOD_MS   100U   /* 10 Hz BMP280 VCP stream & reconnect */
+#define LED_HEARTBEAT_PERIOD_MS   500U   /* 2 Hz LED status update */
+#define UART_TX_BUF_SIZE          2048U  /* Power-of-2 non-blocking TX ring */
+#define UART_TX_BUF_MASK          (UART_TX_BUF_SIZE - 1U)
 
 /* Private variables ---------------------------------------------------------*/
 I2C_HandleTypeDef hi2c1;
@@ -25,16 +30,70 @@ static bmp280_t bmp280;
 static mpu6050Data_t imuData;
 static pose_t aircraftPose;
 
+static uint8_t uartTxBuf[UART_TX_BUF_SIZE];
+static volatile uint16_t uartTxHead = 0U;
+static volatile uint16_t uartTxTail = 0U;
+static volatile uint16_t uartTxActiveLen = 0U;
+static volatile bool uartTxBusy = false;
+
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_I2C1_Init(void);
 static void MX_USART3_UART_Init(void);
 static bmp280_status_t Probe_BMP280_I2C(uint8_t *out_addr);
+static void Uart_StartNextTx(void);
+
+static void Uart_StartNextTx(void)
+{
+  if (uartTxBusy || (uartTxHead == uartTxTail))
+  {
+    return;
+  }
+
+  uint16_t head = uartTxHead;
+  uint16_t tail = uartTxTail;
+  uint16_t len = (head > tail) ? (uint16_t)(head - tail) : (uint16_t)(UART_TX_BUF_SIZE - tail);
+
+  uartTxActiveLen = len;
+  uartTxBusy = true;
+
+  if (HAL_UART_Transmit_IT(&huart3, &uartTxBuf[tail], len) != HAL_OK)
+  {
+    uartTxBusy = false;
+    uartTxActiveLen = 0U;
+  }
+}
+
+void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
+{
+  if (huart->Instance == USART3)
+  {
+    uartTxTail = (uint16_t)((uartTxTail + uartTxActiveLen) & UART_TX_BUF_MASK);
+    uartTxActiveLen = 0U;
+    uartTxBusy = false;
+    Uart_StartNextTx();
+  }
+}
 
 int __io_putchar(int ch)
 {
-  HAL_UART_Transmit(&huart3, (uint8_t *)&ch, 1U, 100U);
+  uint8_t byte = (uint8_t)ch;
+  uint32_t primask = __get_PRIMASK();
+  __disable_irq();
+
+  uint16_t nextHead = (uint16_t)((uartTxHead + 1U) & UART_TX_BUF_MASK);
+  if (nextHead != uartTxTail)
+  {
+    uartTxBuf[uartTxHead] = byte;
+    uartTxHead = nextHead;
+    Uart_StartNextTx();
+  }
+
+  if (primask == 0U)
+  {
+    __enable_irq();
+  }
   return ch;
 }
 
@@ -45,9 +104,27 @@ int _write(int file, char *ptr, int len)
   {
     return 0;
   }
-  if (HAL_UART_Transmit(&huart3, (uint8_t *)ptr, (uint16_t)len, 200U) != HAL_OK)
+
+  uint32_t primask = __get_PRIMASK();
+  __disable_irq();
+
+  uint16_t used = (uint16_t)((uartTxHead - uartTxTail) & UART_TX_BUF_MASK);
+  uint16_t freeSpace = (uint16_t)((UART_TX_BUF_SIZE - 1U) - used);
+
+  /* Drop entire frame only if TX buffer overflows to avoid split lines */
+  if ((uint16_t)len <= freeSpace)
   {
-    return -1;
+    for (int i = 0; i < len; i++)
+    {
+      uartTxBuf[uartTxHead] = (uint8_t)ptr[i];
+      uartTxHead = (uint16_t)((uartTxHead + 1U) & UART_TX_BUF_MASK);
+    }
+    Uart_StartNextTx();
+  }
+
+  if (primask == 0U)
+  {
+    __enable_irq();
   }
   return len;
 }
@@ -65,7 +142,7 @@ static bmp280_status_t Probe_BMP280_I2C(uint8_t *out_addr)
   }
 
   status = bmp280_init_default(&bmp280, &hi2c1, BMP280_I2C_ADDR_SEC);
-  if (status == BMP280_OK && out_addr != NULL)
+  if ((status == BMP280_OK) && (out_addr != NULL))
   {
     *out_addr = BMP280_I2C_ADDR_SEC;
   }
@@ -126,7 +203,7 @@ int main(void)
 
   ComplementaryFilter_Init(&aircraftPose, dFILTER_DEFAULT_ALPHA);
 
-  if (bmpStatus == BMP280_OK && mpuOk)
+  if ((bmpStatus == BMP280_OK) && mpuOk)
   {
     HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, GPIO_PIN_SET);
     HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_RESET);
@@ -137,13 +214,15 @@ int main(void)
   }
 
   uint32_t lastImuTick = HAL_GetTick();
-  uint32_t lastTelemetryTick = lastImuTick;
+  uint32_t lastMpuTxTick = lastImuTick;
+  uint32_t lastBmpTxTick = lastImuTick;
+  uint32_t lastLedTick = lastImuTick;
 
   while (1)
   {
     uint32_t loopStart = HAL_GetTick();
 
-    /* 1. High-rate (100 Hz) MPU-6050 sampling + Complementary Filter update */
+    /* 1. 100 Hz MPU-6050 sampling + Complementary Filter update */
     if (mpuOk)
     {
       uint32_t dtMs = loopStart - lastImuTick;
@@ -164,10 +243,24 @@ int main(void)
       }
     }
 
-    /* 2. Periodic (2 Hz / 500 ms) BMP280 read, retry detached sensors, and VCP print */
-    if ((loopStart - lastTelemetryTick) >= TELEMETRY_PERIOD_MS)
+    /* 2. 50 Hz MPU-6050 & Pose non-blocking serial stream */
+    if ((loopStart - lastMpuTxTick) >= MPU_TELEMETRY_PERIOD_MS)
     {
-      lastTelemetryTick = loopStart;
+      lastMpuTxTick = loopStart;
+      if (mpuOk)
+      {
+        printf("[NUCLEO-F767ZI MPU6050 I2C] Acc: %+6.2f,%+6.2f,%+6.2f g | Gyro: %+7.2f,%+7.2f,%+7.2f dps | Temp: %5.2f degC | Pose R:%+6.1f P:%+6.1f Y:%+6.1f deg\r\n",
+               imuData.accelXG, imuData.accelYG, imuData.accelZG,
+               imuData.gyroXDps, imuData.gyroYDps, imuData.gyroZDps,
+               imuData.tempC,
+               aircraftPose.rollDeg, aircraftPose.pitchDeg, aircraftPose.yawDeg);
+      }
+    }
+
+    /* 3. 10 Hz BMP280 read, sensor reconnect retry, and serial stream */
+    if ((loopStart - lastBmpTxTick) >= BMP_TELEMETRY_PERIOD_MS)
+    {
+      lastBmpTxTick = loopStart;
 
       if (bmpStatus != BMP280_OK)
       {
@@ -206,17 +299,13 @@ int main(void)
           bmpStatus = BMP280_ERR_COMM;
         }
       }
+    }
 
-      if (mpuOk)
-      {
-        printf("[NUCLEO-F767ZI MPU6050 I2C] Acc: %+6.2f,%+6.2f,%+6.2f g | Gyro: %+7.2f,%+7.2f,%+7.2f dps | Temp: %5.2f degC | Pose R:%+6.1f P:%+6.1f Y:%+6.1f deg\r\n",
-               imuData.accelXG, imuData.accelYG, imuData.accelZG,
-               imuData.gyroXDps, imuData.gyroYDps, imuData.gyroZDps,
-               imuData.tempC,
-               aircraftPose.rollDeg, aircraftPose.pitchDeg, aircraftPose.yawDeg);
-      }
-
-      if (bmpStatus == BMP280_OK && mpuOk)
+    /* 4. Visual heartbeat LED status */
+    if ((loopStart - lastLedTick) >= LED_HEARTBEAT_PERIOD_MS)
+    {
+      lastLedTick = loopStart;
+      if ((bmpStatus == BMP280_OK) && mpuOk)
       {
         HAL_GPIO_TogglePin(LD1_GPIO_Port, LD1_Pin);
         HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_RESET);
@@ -322,6 +411,9 @@ static void MX_USART3_UART_Init(void)
   {
     Error_Handler();
   }
+
+  HAL_NVIC_SetPriority(USART3_IRQn, 3U, 0U);
+  HAL_NVIC_EnableIRQ(USART3_IRQn);
 }
 
 static void MX_GPIO_Init(void)

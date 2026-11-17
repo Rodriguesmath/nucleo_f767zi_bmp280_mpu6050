@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NUCLEO-F767ZI Flight Visualizer | BMP280 + MPU-6050</title>
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="scene-canvas"></canvas>
+      <canvas id="pfd-canvas"></canvas>
+
+      <header class="topbar">
+        <div class="brand">
+          <span class="dot" id="status-dot"></span>
+          <div>
+            <h1>NUCLEO-F767ZI 3D Flight Visualizer</h1>
+            <p class="subtitle">BMP280 (I2C) + MPU-6050 (6-DOF) | 216 MHz Cortex-M7</p>
+          </div>
+        </div>
+
+        <div class="controls">
+          <select id="port-select" title="Porta Serial"></select>
+          <select id="baud-select" title="Baudrate">
+            <option value="115200" selected>115200</option>
+            <option value="230400">230400</option>
+            <option value="460800">460800</option>
+            <option value="921600">921600</option>
+          </select>
+          <button id="btn-connect" class="btn primary">Conectar Bridge</button>
+          <button id="btn-webserial" class="btn" title="Web Serial API (Chromium/Chrome)">WebSerial</button>
+          <button id="btn-sim" class="btn">Simulador</button>
+          <button id="btn-tare-pose" class="btn">Tare Pose</button>
+          <button id="btn-zero-alt" class="btn">Zero Alt</button>
+          <select id="cam-select" title="Camera">
+            <option value="chase">Chase Cam</option>
+            <option value="orbit">Orbit Free</option>
+            <option value="cockpit">Cockpit HUD</option>
+            <option value="top">Top Down</option>
+          </select>
+          <button id="btn-hud-toggle" class="btn active">HUD</button>
+        </div>
+      </header>
+
+      <aside class="panel left-panel">
+        <div class="card">
+          <div class="card-title">ATITUDE &amp; INERCIAL (MPU-6050)</div>
+          <div class="grid-3">
+            <div class="metric"><label>ROLL</label><span id="val-roll">0.0°</span></div>
+            <div class="metric"><label>PITCH</label><span id="val-pitch">0.0°</span></div>
+            <div class="metric"><label>YAW</label><span id="val-yaw">0.0°</span></div>
+          </div>
+          <div class="grid-3">
+            <div class="metric"><label>ACC X</label><span id="val-ax">+0.00 g</span></div>
+            <div class="metric"><label>ACC Y</label><span id="val-ay">+0.00 g</span></div>
+            <div class="metric"><label>ACC Z</label><span id="val-az">+1.00 g</span></div>
+          </div>
+          <div class="grid-3">
+            <div class="metric"><label>GYRO X</label><span id="val-gx">+0.0 dps</span></div>
+            <div class="metric"><label>GYRO Y</label><span id="val-gy">+0.0 dps</span></div>
+            <div class="metric"><label>GYRO Z</label><span id="val-gz">+0.0 dps</span></div>
+          </div>
+          <div class="grid-2">
+            <div class="metric"><label>CARGA G |a|</label><span id="val-gload">1.00 g</span></div>
+            <div class="metric"><label>TEMP IMU</label><span id="val-mpu-temp">25.0 °C</span></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">ATMOSFERA &amp; ALTITUDE (BMP280)</div>
+          <div class="grid-2">
+            <div class="metric"><label>PRESSÃO</label><span id="val-press">1013.25 hPa</span></div>
+            <div class="metric"><label>ALT HIPSOM.</label><span id="val-alt">0.00 m</span></div>
+          </div>
+          <div class="grid-3">
+            <div class="metric"><label>ALT REL.</label><span id="val-rel-alt">0.00 m</span></div>
+            <div class="metric"><label>VSI (dH/dt)</label><span id="val-vsi">0.00 m/s</span></div>
+            <div class="metric"><label>TEMP OAT</label><span id="val-bmp-temp">25.00 °C</span></div>
+          </div>
+          <div class="grid-2">
+            <div class="metric"><label>DENSIDADE AR</label><span id="val-rho">1.225 kg/m³</span></div>
+            <div class="metric"><label>ΔT (IMU-OAT)</label><span id="val-dt">0.0 °C</span></div>
+          </div>
+          <div class="qnh-row">
+            <label for="qnh-input">QNH (hPa):</label>
+            <input id="qnh-input" type="number" step="0.1" min="850" max="1100" value="1013.25" />
+          </div>
+        </div>
+
+        <div class="card log-card">
+          <div class="card-title">STREAM &amp; DIAGNÓSTICO</div>
+          <div class="grid-3">
+            <div class="metric"><label>MODO</label><span id="val-mode">STANDBY</span></div>
+            <div class="metric"><label>PKT RATE</label><span id="val-rate">0 Hz</span></div>
+            <div class="metric"><label>RENDER</label><span id="val-fps">60 FPS</span></div>
+          </div>
+          <pre id="serial-log"></pre>
+        </div>
+      </aside>
+
+      <aside class="panel right-panel">
+        <div class="card chart-card">
+          <div class="card-title">ALTITUDE RELATIVA (m) &amp; VSI</div>
+          <canvas id="chart-alt" width="320" height="110"></canvas>
+        </div>
+        <div class="card chart-card">
+          <div class="card-title">GIROSCÓPIO 3-EIXOS (dps)</div>
+          <canvas id="chart-gyro" width="320" height="110"></canvas>
+        </div>
+        <div class="card chart-card">
+          <div class="card-title">ACELERAÇÃO &amp; CARGA G (g)</div>
+          <canvas id="chart-accel" width="320" height="110"></canvas>
+        </div>
+      </aside>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
