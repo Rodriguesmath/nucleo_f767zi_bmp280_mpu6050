@@ -9,14 +9,17 @@ from __future__ import annotations
 import argparse
 import asyncio
 from dataclasses import dataclass
+import errno
 from functools import partial
 import http.server
 import json
 import os
 from pathlib import Path
 import re
+import shutil
 import socketserver
 import struct
+import subprocess
 import threading
 import time
 from typing import Optional
@@ -123,6 +126,19 @@ def select_default_port(ports: list[dict[str, str]]) -> Optional[str]:
 
 
 class QuietHTTPHandler(http.server.SimpleHTTPRequestHandler):
+    def do_GET(self) -> None:
+        if self.path.split("?", 1)[0] == "/ws-config.json":
+            ws_port = getattr(self.server, "ws_port", 8765)
+            body = json.dumps({"wsPort": ws_port}).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        super().do_GET()
+
     def log_message(self, format: str, *args: object) -> None:
         return
 
@@ -130,6 +146,10 @@ class QuietHTTPHandler(http.server.SimpleHTTPRequestHandler):
 class ThreadedHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
     daemon_threads = True
     allow_reuse_address = True
+
+    def __init__(self, server_address: tuple[str, int], RequestHandlerClass: type, ws_port: int = 8765) -> None:
+        self.ws_port = ws_port
+        super().__init__(server_address, RequestHandlerClass)
 
 
 class SerialBridge:
@@ -272,12 +292,38 @@ async def ws_handler(websocket: ServerConnection, bridge: SerialBridge) -> None:
         bridge.clients.discard(websocket)
 
 
-def start_http_server(dist_dir: Path, host: str, port: int) -> ThreadedHTTPServer:
+def start_http_server(dist_dir: Path, host: str, port: int, ws_port: int = 8765) -> ThreadedHTTPServer:
     handler = partial(QuietHTTPHandler, directory=str(dist_dir))
-    httpd = ThreadedHTTPServer((host, port), handler)
-    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
-    thread.start()
-    return httpd
+    attempts = 1 if port == 0 else 20
+    last_err: Optional[OSError] = None
+    for offset in range(attempts):
+        candidate = 0 if port == 0 else port + offset
+        try:
+            httpd = ThreadedHTTPServer((host, candidate), handler, ws_port=ws_port)
+            thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+            thread.start()
+            return httpd
+        except OSError as exc:
+            if exc.errno != errno.EADDRINUSE:
+                raise
+            last_err = exc
+    assert last_err is not None
+    raise last_err
+
+
+async def start_ws_server(handler: object, host: str, port: int) -> websockets.asyncio.server.Server:
+    attempts = 1 if port == 0 else 20
+    last_err: Optional[OSError] = None
+    for offset in range(attempts):
+        candidate = 0 if port == 0 else port + offset
+        try:
+            return await ws_serve(handler, host, candidate)  # type: ignore[arg-type]
+        except OSError as exc:
+            if exc.errno != errno.EADDRINUSE:
+                raise
+            last_err = exc
+    assert last_err is not None
+    raise last_err
 
 
 async def async_main(args: argparse.Namespace) -> None:
@@ -285,24 +331,32 @@ async def async_main(args: argparse.Namespace) -> None:
     if not dist_dir.is_dir():
         dist_dir = Path(__file__).resolve().parent
 
-    httpd = start_http_server(dist_dir, args.host, args.http_port)
     loop = asyncio.get_running_loop()
     bridge = SerialBridge(loop, initial_baud=args.baud)
+
+    ws_server = await start_ws_server(partial(ws_handler, bridge=bridge), args.host, args.ws_port)
+    actual_ws_port = ws_server.sockets[0].getsockname()[1]
+    httpd = start_http_server(dist_dir, args.host, args.http_port, ws_port=actual_ws_port)
+    actual_http_port = httpd.server_address[1]
 
     if not args.no_auto:
         default_port = args.port or select_default_port(discover_serial_ports())
         if default_port:
             bridge.connect(default_port, args.baud)
 
-    print(f"[VIEWER] HTTP: http://{args.host}:{args.http_port}")
-    print(f"[VIEWER] WS:   ws://{args.host}:{args.ws_port}")
+    url = f"http://{args.host}:{actual_http_port}"
+    print(f"[VIEWER] HTTP: {url}")
+    print(f"[VIEWER] WS:   ws://{args.host}:{actual_ws_port}")
     if bridge.port:
         print(f"[VIEWER] Serial: {bridge.port} @ {args.baud} bps")
     else:
         print("[VIEWER] Serial: standby (no board detected; Simulator mode ready in browser)")
 
+    if args.open and shutil.which("xdg-open"):
+        subprocess.Popen(["xdg-open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
     try:
-        async with ws_serve(partial(ws_handler, bridge=bridge), args.host, args.ws_port):
+        async with ws_server:
             await asyncio.Future()
     finally:
         bridge.disconnect()
@@ -315,9 +369,10 @@ def main() -> None:
     parser.add_argument("--port", default=None, help="Serial device path (e.g. /dev/ttyACM0)")
     parser.add_argument("--baud", type=int, default=115200, help="UART baudrate (default: 115200)")
     parser.add_argument("--host", default="127.0.0.1", help="Bind address (default: 127.0.0.1)")
-    parser.add_argument("--http-port", type=int, default=8080, help="HTTP port (default: 8080)")
+    parser.add_argument("--http-port", type=int, default=8780, help="HTTP port (default: 8780)")
     parser.add_argument("--ws-port", type=int, default=8765, help="WebSocket port (default: 8765)")
     parser.add_argument("--no-auto", action="store_true", help="Do not auto-connect serial on startup")
+    parser.add_argument("--open", action="store_true", help="Open browser automatically")
     args = parser.parse_args()
 
     try:

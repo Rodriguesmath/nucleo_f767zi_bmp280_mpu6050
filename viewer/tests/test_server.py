@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import pty
+import socket
 import struct
 import sys
 import termios
@@ -166,6 +167,26 @@ class TestSerialBridgeParser(unittest.TestCase):
             httpd.server_close()
             os.close(master_fd)
             os.close(slave_fd)
+
+    def test_port_fallback_and_ws_config_endpoint(self) -> None:
+        dist_dir = Path(__file__).resolve().parents[1]
+        blocker = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        blocker.bind(("127.0.0.1", 0))
+        blocker.listen(1)
+        busy_port = blocker.getsockname()[1]
+
+        httpd = server.start_http_server(dist_dir, "127.0.0.1", busy_port, ws_port=9123)
+        try:
+            actual_port = httpd.server_address[1]
+            self.assertGreater(actual_port, busy_port)
+            with urllib.request.urlopen(f"http://127.0.0.1:{actual_port}/ws-config.json", timeout=2.0) as resp:
+                self.assertEqual(resp.status, 200)
+                cfg = json.loads(resp.read().decode("utf-8"))
+                self.assertEqual(cfg["wsPort"], 9123)
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+            blocker.close()
 
 
 if __name__ == "__main__":

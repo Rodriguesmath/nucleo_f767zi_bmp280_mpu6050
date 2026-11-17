@@ -204,8 +204,27 @@ window.addEventListener('resize', () => {
   hud.resizePfd(w, h);
 });
 
-// Start WebSocket bridge listener cleanly
-telemetry.startWebSocket();
+// Start WebSocket bridge listener using dynamic /ws-config.json port
+async function initTransport(): Promise<void> {
+  const qsPort = new URLSearchParams(window.location.search).get('ws');
+  let wsPort = qsPort ? Number(qsPort) : 8765;
+  if (!qsPort) {
+    try {
+      const resp = await fetch('/ws-config.json', { cache: 'no-store' });
+      if (resp.ok) {
+        const cfg = (await resp.json()) as { wsPort?: number };
+        if (typeof cfg.wsPort === 'number') {
+          wsPort = cfg.wsPort;
+        }
+      }
+    } catch {
+      // Keep default 8765 during standalone vite dev
+    }
+  }
+  const wsHost = window.location.hostname || '127.0.0.1';
+  telemetry.startWebSocket(`ws://${wsHost}:${wsPort}`);
+}
+void initTransport();
 
 // Preallocated math objects (zero GC in animation loop)
 const targetEuler = new THREE.Euler(0, 0, 0, 'YXZ');
